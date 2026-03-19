@@ -1,0 +1,13 @@
+ext:
+  - .md
+
+ignore:
+  - .git
+  - node_modules
+  - .idea
+  - .vscode
+  - dist
+  - build
+
+debounce: 500ms
+max_file_size: 10485760
