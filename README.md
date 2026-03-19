@@ -63,9 +63,9 @@ Common options:
 ```bash
 ./punctpolish \
   --dir /path/to/docs \
-  --scan-on-start \
+  --foreground \
   --debounce 300ms \
-  --log-level debug
+  --log-level warn
 ```
 
 ### CLI flags
@@ -74,8 +74,36 @@ Common options:
 - `--config`: explicit config file path
 - `--scan-on-start`: process existing matching files before entering watch mode
 - `--dry-run`: log what would change without writing files
+- `--foreground`: also write runtime logs to the terminal
 - `--debounce`: override debounce duration, for example `300ms`
-- `--log-level`: `debug`, `info`, `warn`, or `error`
+- `--log-level`: `debug`, `info`, `warn`, or `error` (default: `warn`)
+
+## Logging
+
+By default, `punctpolish` writes logs to `punctpolish.log` in the current working directory.
+
+Example:
+
+- If you run `./punctpolish --dir /path/to/docs` from `/Users/yourname/tools`, the log file will be `/Users/yourname/tools/punctpolish.log`
+- If you run it from the watched directory itself, the log file will be created there
+
+Default logging behavior:
+
+- Startup and argument errors are shown directly in the terminal and also written to the log file
+- Normal runtime logs are not written to the terminal
+- Default log level is `warn`
+- In normal use, the log file mainly contains warnings and errors
+- If you need more detail during debugging, start with `--log-level debug`
+- In `debug` mode, extra debug details are written to `punctpolish.log`; they are still not streamed to the terminal during normal running
+- If you also pass `--foreground`, runtime logs are written to both `punctpolish.log` and the terminal
+
+Examples:
+
+```bash
+./punctpolish --dir /path/to/docs
+./punctpolish --dir /path/to/docs --log-level debug
+./punctpolish --dir /path/to/docs --foreground --log-level debug
+```
 
 ## Configuration
 
@@ -219,12 +247,6 @@ Create `~/Library/LaunchAgents/com.example.punctpolish.plist`:
 
   <key>WorkingDirectory</key>
   <string>/Users/yourname/path/to/docs</string>
-
-  <key>StandardOutPath</key>
-  <string>/Users/yourname/Library/Logs/punctpolish.log</string>
-
-  <key>StandardErrorPath</key>
-  <string>/Users/yourname/Library/Logs/punctpolish.error.log</string>
 </dict>
 </plist>
 ```
@@ -265,14 +287,14 @@ launchctl list | grep punctpolish
 
 If startup fails, inspect:
 
-- `~/Library/Logs/punctpolish.log`
-- `~/Library/Logs/punctpolish.error.log`
+- `/Users/yourname/path/to/docs/punctpolish.log`
 
 ### Notes for background use
 
 - Use absolute paths in the plist for the binary, watched directory, and config file.
 - Keep the binary in a stable location so future rebuilds do not break the service.
 - If you update the binary or plist, unload and load the agent again.
+- `WorkingDirectory` also decides where the default `punctpolish.log` file is created.
 - `WorkingDirectory` helps config auto-discovery, but using `--config` is the most explicit and reliable setup for a background service.
 
 ## What Gets Normalized
