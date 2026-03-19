@@ -3,7 +3,7 @@ package processor
 import (
 	"log/slog"
 	"os"
-	"textwatcher/internal/fileutil"
+	"punctpolish/internal/fileutil"
 )
 
 // Processor reads a file, normalizes its text content, and writes it back.

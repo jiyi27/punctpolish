@@ -1,6 +1,6 @@
 //go:build integration
 
-// Package test contains end-to-end integration tests for textwatcher.
+// Package test contains end-to-end integration tests for punctpolish.
 // These tests build the real binary and run it as a subprocess against a
 // temporary directory, so they verify the full stack: watcher → processor →
 // normalize → write-back.
@@ -28,24 +28,24 @@ const (
 	grace = 600 * time.Millisecond
 
 	// binaryName is the output path for the compiled binary.
-	binaryName = "/tmp/textwatcher-integration-test"
+	binaryName = "/tmp/punctpolish-integration-test"
 )
 
 // TestMain builds the binary once before running all integration tests.
 func TestMain(m *testing.M) {
-	cmd := exec.Command("go", "build", "-o", binaryName, "../cmd/textwatcher")
+	cmd := exec.Command("go", "build", "-o", binaryName, "../cmd/punctpolish")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		// Cannot build — all tests would fail anyway.
-		panic("failed to build textwatcher: " + err.Error())
+		panic("failed to build punctpolish: " + err.Error())
 	}
 	defer os.Remove(binaryName)
 
 	os.Exit(m.Run())
 }
 
-// startWatcher launches the textwatcher binary against dir and returns a
+// startWatcher launches the punctpolish binary against dir and returns a
 // function that stops it.
 func startWatcher(t *testing.T, dir string, extraArgs ...string) func() {
 	t.Helper()

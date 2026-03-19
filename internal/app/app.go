@@ -6,10 +6,10 @@ import (
 	"os/signal"
 	"syscall"
 
-	"textwatcher/internal/config"
-	"textwatcher/internal/fileutil"
-	"textwatcher/internal/processor"
-	"textwatcher/internal/watcher"
+	"punctpolish/internal/config"
+	"punctpolish/internal/fileutil"
+	"punctpolish/internal/processor"
+	"punctpolish/internal/watcher"
 )
 
 // App wires all components together and manages the process lifecycle.

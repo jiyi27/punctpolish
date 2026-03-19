@@ -9,7 +9,7 @@ import (
 )
 
 const (
-	configFileName  = ".textwatcher.yaml"
+	configFileName  = ".punctpolish.yaml"
 	DefaultDebounce = 500 * time.Millisecond
 	DefaultWriteGap = 1 * time.Second
 	DefaultMaxBytes = 10 * 1024 * 1024 // 10 MB

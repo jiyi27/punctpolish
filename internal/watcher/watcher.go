@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"textwatcher/internal/config"
-	"textwatcher/internal/fileutil"
-	"textwatcher/internal/processor"
+	"punctpolish/internal/config"
+	"punctpolish/internal/fileutil"
+	"punctpolish/internal/processor"
 )
 
 // Watcher wraps fsnotify and adds recursive watching, extension filtering,

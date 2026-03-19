@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run.sh — manual integration smoke test for textwatcher.
+# run.sh — manual integration smoke test for punctpolish.
 #
 # Usage:
 #   ./test/run.sh           # run all checks
@@ -18,7 +18,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-BINARY="/tmp/textwatcher-smoke"
+BINARY="/tmp/punctpolish-smoke"
 KEEP=false
 
 for arg in "$@"; do
@@ -53,7 +53,7 @@ trap cleanup EXIT
 # ── 1. Build ────────────────────────────────────────────────────────────────
 section "Building binary"
 cd "$ROOT_DIR"
-go build -o "$BINARY" ./cmd/textwatcher
+go build -o "$BINARY" ./cmd/punctpolish
 info "binary: $BINARY"
 
 # ── 2. Prepare temp dir ──────────────────────────────────────────────────────
