@@ -4,6 +4,7 @@ import (
 	"regexp"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // stage is a document-level transformation: takes the full text, returns transformed text.
@@ -13,7 +14,7 @@ type stage func(string) string
 var pipeline = []stage{
 	linePass(replaceChinesePunctuation), // stage 1: Chinese punctuation → English equivalents
 	linePass(normalizeCommaSpacing),     // stage 2: ensure space after comma
-	linePass(insertCJKLatinSpaces),      // stage 3: space at CJK↔Latin/digit boundaries
+	linePass(insertCJKLatinSpacesSafe),  // stage 3: space at CJK↔Latin/digit boundaries
 	linePass(collapseSpaces),            // stage 4: collapse runs of spaces (per line)
 	stripParaEndSeparators,              // stage 5: remove trailing punctuation at paragraph ends
 }
@@ -138,6 +139,16 @@ func isCloseBracket(r rune) bool {
 	return false
 }
 
+func shouldInsertBoundarySpace(left, right rune) bool {
+	if isCJK(left) && (isLatinOrDigit(right) || isOpenBracket(right)) {
+		return true
+	}
+	if (isLatinOrDigit(left) || isCloseBracket(left)) && isCJK(right) {
+		return true
+	}
+	return false
+}
+
 func insertCJKLatinSpaces(s string) string {
 	runes := []rune(s)
 	var b strings.Builder
@@ -148,15 +159,60 @@ func insertCJKLatinSpaces(s string) string {
 			break
 		}
 		next := runes[i+1]
-		if isCJK(r) && (isLatinOrDigit(next) || isOpenBracket(next)) {
-			b.WriteRune(' ')
-			continue
-		}
-		if (isLatinOrDigit(r) || isCloseBracket(r)) && isCJK(next) {
+		if shouldInsertBoundarySpace(r, next) {
 			b.WriteRune(' ')
 		}
 	}
 	return b.String()
+}
+
+// markdownProtectedSpan matches inline Markdown links/images and bare HTTP(S)
+// URLs so we can avoid changing their contents during spacing insertion.
+var markdownProtectedSpan = regexp.MustCompile(`!?\[[^\]]*\]\([^)]+\)|https?://[^\s<>)\]]+`)
+
+func insertCJKLatinSpacesSafe(s string) string {
+	matches := markdownProtectedSpan.FindAllStringIndex(s, -1)
+	if len(matches) == 0 {
+		return insertCJKLatinSpaces(s)
+	}
+
+	var b strings.Builder
+	last := 0
+	for _, m := range matches {
+		start, end := m[0], m[1]
+		if start > last {
+			b.WriteString(insertCJKLatinSpaces(s[last:start]))
+		}
+		if start > 0 {
+			left, _ := utf8LastRuneInString(s[:start])
+			right, _ := utf8.DecodeRuneInString(s[start:end])
+			if left != utf8.RuneError && right != utf8.RuneError && shouldInsertBoundarySpace(left, right) && !builderEndsWithSpace(&b) {
+				b.WriteRune(' ')
+			}
+		}
+		b.WriteString(s[start:end])
+		last = end
+	}
+	if last < len(s) {
+		if len(s) > 0 {
+			left, _ := utf8LastRuneInString(s[:last])
+			right, _ := utf8.DecodeRuneInString(s[last:])
+			if left != utf8.RuneError && right != utf8.RuneError && shouldInsertBoundarySpace(left, right) && !strings.HasPrefix(s[last:], " ") {
+				b.WriteRune(' ')
+			}
+		}
+		b.WriteString(insertCJKLatinSpaces(s[last:]))
+	}
+	return b.String()
+}
+
+func utf8LastRuneInString(s string) (rune, int) {
+	return utf8.DecodeLastRuneInString(s)
+}
+
+func builderEndsWithSpace(b *strings.Builder) bool {
+	out := b.String()
+	return strings.HasSuffix(out, " ")
 }
 
 // reMultiSpace matches two or more consecutive spaces (not newlines).
