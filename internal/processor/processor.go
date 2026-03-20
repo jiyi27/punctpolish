@@ -25,13 +25,13 @@ func New(guard *fileutil.WriteGuard, maxFileSize int64, dryRun bool) *Processor 
 }
 
 // Process applies text normalization to the file at path.
-// Errors are logged and never propagated to the caller, so a single bad file
-// cannot stop the watch loop.
-func (p *Processor) Process(path string) {
+// It returns whether the file was changed and any error encountered.
+// The caller decides how to handle errors; the watch loop logs and ignores them.
+func (p *Processor) Process(path string) (changed bool, err error) {
 	info, err := os.Stat(path)
 	if err != nil {
 		slog.Error("cannot stat file", "path", path, "error", err)
-		return
+		return false, err
 	}
 
 	if info.Size() > p.maxFileSize {
@@ -40,23 +40,23 @@ func (p *Processor) Process(path string) {
 			"size", info.Size(),
 			"limit", p.maxFileSize,
 		)
-		return
+		return false, nil
 	}
 
 	ok, err := fileutil.IsTextFile(path)
 	if err != nil {
 		slog.Error("cannot read file for text detection", "path", path, "error", err)
-		return
+		return false, err
 	}
 	if !ok {
 		slog.Warn("non-text file skipped", "path", path, "error", "binary content detected")
-		return
+		return false, nil
 	}
 
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		slog.Error("cannot read file", "path", path, "error", err)
-		return
+		return false, err
 	}
 
 	original := string(raw)
@@ -64,12 +64,12 @@ func (p *Processor) Process(path string) {
 
 	if normalized == original {
 		slog.Debug("file unchanged after normalization", "path", path)
-		return
+		return false, nil
 	}
 
 	if p.dryRun {
 		slog.Info("dry-run: file would be normalized", "path", path)
-		return
+		return true, nil
 	}
 
 	// Mark before writing so the resulting fsnotify event is suppressed.
@@ -77,8 +77,9 @@ func (p *Processor) Process(path string) {
 
 	if err := os.WriteFile(path, []byte(normalized), info.Mode()); err != nil {
 		slog.Error("cannot write file", "path", path, "error", err)
-		return
+		return false, err
 	}
 
 	slog.Info("file normalized", "path", path)
+	return true, nil
 }

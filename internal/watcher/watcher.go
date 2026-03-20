@@ -95,7 +95,7 @@ func (w *Watcher) ScanAndProcess(dir string) {
 			return nil
 		}
 		if w.isTargetFile(path) {
-			w.proc.Process(path)
+			w.proc.Process(path) //nolint:errcheck // scan: errors already logged inside Process
 		}
 		return nil
 	})
@@ -184,7 +184,7 @@ func (w *Watcher) scheduleProcess(path string) {
 		w.dmu.Unlock()
 
 		slog.Info("file changed", "path", path)
-		w.proc.Process(path)
+		w.proc.Process(path) //nolint:errcheck // watch loop: errors already logged inside Process
 	})
 }
 

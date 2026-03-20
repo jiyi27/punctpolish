@@ -12,7 +12,9 @@ import (
 
 	"punctpolish/internal/app"
 	"punctpolish/internal/config"
+	"punctpolish/internal/fileutil"
 	"punctpolish/internal/logging"
+	"punctpolish/internal/processor"
 )
 
 func main() {
@@ -20,7 +22,8 @@ func main() {
 	fs.SetOutput(io.Discard)
 
 	var (
-		dir         = fs.String("dir", "", "root directory to watch (required)")
+		dir         = fs.String("dir", "", "root directory to watch (mutually exclusive with --file)")
+		file        = fs.String("file", "", "single file to process once and exit (mutually exclusive with --dir)")
 		cfgFile     = fs.String("config", "", "path to config file (default: auto-discover .punctpolish.yaml)")
 		scanOnStart = fs.Bool("scan-on-start", false, "process all matching files once before entering watch mode")
 		dryRun      = fs.Bool("dry-run", false, "print what would change without writing files")
@@ -51,10 +54,35 @@ func main() {
 		fatal(resolvedLog, "punctpolish only supports macOS")
 	}
 
-	if *dir == "" {
-		fatal(resolvedLog, "missing required flag: --dir")
+	if *dir != "" && *file != "" {
+		fatal(resolvedLog, "--dir and --file are mutually exclusive")
+	}
+	if *dir == "" && *file == "" {
+		fatal(resolvedLog, "one of --dir or --file is required")
 	}
 
+	// --- single-file mode ---
+	if *file != "" {
+		absFile, err := resolveFile(*file)
+		if err != nil {
+			fatal(resolvedLog, fmt.Sprintf("cannot access --file %q: %v", *file, err))
+		}
+
+		cfg, err := config.Load(*cfgFile, filepath.Dir(absFile))
+		if err != nil {
+			fatal(resolvedLog, fmt.Sprintf("cannot load config: %v", err))
+		}
+		cfg.DryRun = *dryRun
+
+		guard := fileutil.NewWriteGuard(config.DefaultWriteGap)
+		proc := processor.New(guard, cfg.MaxFileSize, cfg.DryRun)
+		if _, err := proc.Process(absFile); err != nil {
+			fatal(resolvedLog, fmt.Sprintf("failed to process %q: %v", absFile, err))
+		}
+		return
+	}
+
+	// --- watch mode ---
 	absDir, err := resolveDir(*dir)
 	if err != nil {
 		fatal(resolvedLog, fmt.Sprintf("cannot access --dir %q: %v", *dir, err))
@@ -78,6 +106,23 @@ func main() {
 	if err := app.New(cfg, absDir).Run(); err != nil {
 		fatal(resolvedLog, fmt.Sprintf("fatal error: %v", err))
 	}
+}
+
+// resolveFile validates that path exists and is a regular file, then returns
+// its absolute path.
+func resolveFile(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(abs)
+	if err != nil {
+		return "", err
+	}
+	if info.IsDir() {
+		return "", fmt.Errorf("%q is a directory, not a file", abs)
+	}
+	return abs, nil
 }
 
 // resolveDir validates that path exists and is a directory, then returns its
@@ -115,9 +160,10 @@ func printStartupError(message, logFile string) {
 		b.WriteString(logFile)
 		b.WriteString("\n")
 	}
-	b.WriteString("example:\n")
+	b.WriteString("examples:\n")
 	fmt.Fprintf(&b, "  %s --dir /path/to/docs\n", name)
-	fmt.Fprintf(&b, "  %s --dir /path/to/docs --log-level debug\n", name)
-	fmt.Fprintf(&b, "  %s --dir /path/to/docs --foreground --log-level debug\n", name)
+	fmt.Fprintf(&b, "  %s --dir /path/to/docs --scan-on-start\n", name)
+	fmt.Fprintf(&b, "  %s --file /path/to/note.md\n", name)
+	fmt.Fprintf(&b, "  %s --file /path/to/note.md --dry-run\n", name)
 	fmt.Fprint(os.Stderr, b.String())
 }
