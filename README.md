@@ -82,7 +82,7 @@ go run ./cmd/punctpolish --dir /path/to/docs
 3. 被监听的目录
 4. `$HOME`
 
-如果都找不到，就使用内置默认配置。
+如果都找不到，就使用内置默认配置
 
 示例：
 
