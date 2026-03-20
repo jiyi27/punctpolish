@@ -59,3 +59,7 @@ Tests in `test/integration_test.go` use `//go:build integration` and spawn the a
 - Only changed files are processed (not untouched files)
 - Pre-existing files are not touched on startup without `--scan-on-start`
 - `--scan-on-start` processes all pre-existing matching files
+
+## Coding Conventions
+
+- **Code Comments**: Prefer purpose-driven comments that explain intent or constraints, not comments that just restate variable names or obvious code behavior.
