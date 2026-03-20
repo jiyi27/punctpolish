@@ -1,31 +1,33 @@
 package processor
 
 import (
+	"fmt"
 	"os"
 	"strings"
-	"testing"
 )
 
-// TestPreview processes the sample fixture and prints the result.
-// Not an automated assertion — run with -v to inspect the output visually.
+// ExampleNormalizeText_preview processes the sample fixture and prints the
+// normalized result for manual inspection during local development.
 //
-//	go test -v -run TestPreview ./internal/processor/
-func TestPreview(t *testing.T) {
+//	go test -run ExampleNormalizeText_preview -v ./internal/processor
+func ExampleNormalizeText_preview() {
 	fixture, err := os.ReadFile("../../test/fixtures/sample.md")
 	if err != nil {
-		t.Fatalf("cannot read fixture: %v", err)
+		fmt.Printf("cannot read fixture: %v\n", err)
+		return
 	}
 
 	input := string(fixture)
 	output := NormalizeText(input)
 
-	t.Log("=== INPUT ===")
+	fmt.Println("=== INPUT ===")
 	for _, line := range strings.Split(input, "\n") {
-		t.Log(line)
+		fmt.Println(line)
 	}
 
-	t.Log("\n=== OUTPUT ===")
+	fmt.Println()
+	fmt.Println("=== OUTPUT ===")
 	for _, line := range strings.Split(output, "\n") {
-		t.Log(line)
+		fmt.Println(line)
 	}
 }

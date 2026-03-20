@@ -1,361 +1,154 @@
 # punctpolish
 
-`punctpolish` is a small macOS file watcher that automatically normalizes text files when they change.
+平时写笔记有强迫症, 拷贝过来的东西有中文句号, 单词和汉字贴在一块, 看着不舒服, 于是写个 macOS 上的小工具递归监听指定目录, 有文件改动时就触发符号替换机制, 仅修改有变动的文件
 
-It is designed for mixed Chinese and English writing workflows, especially Markdown documents that need cleaner punctuation and spacing without touching fenced code blocks.
+## 它能做什么
 
-## Features
+- 递归监听目录及其子目录
+- 只在文件发生变化时处理匹配的文本文件
+- 将常见中文标点替换为 ASCII 标点
+- 自动处理中英文、数字之间的空格，例如 `ERP 系统`、`JSON 数据`
+- 跳过二进制文件，并避免自己写回文件时触发死循环
+- 支持 `--dry-run` 和 `--scan-on-start`
 
-- Recursively watches a directory and its subdirectories
-- Processes matching files on create, write, and rename events
-- Supports configurable file extensions, ignored directories, debounce delay, and file size limits
-- Rewrites Chinese punctuation into ASCII punctuation outside fenced code blocks
-- Inserts spacing between CJK and Latin/digit text such as `ERP 系统` and `JSON 数据`
-- Normalizes comma spacing and collapses repeated spaces
-- Removes trailing punctuation at paragraph endings and list items
-- Skips binary files and suppresses self-triggered write loops
-- Supports `--dry-run` and `--scan-on-start`
-
-## Requirements
-
-- macOS only
-- Go 1.23.12 or newer
-
-The binary exits immediately on non-macOS systems.
-
-## Installation
-
-Build from source:
-
-```bash
-go build -o punctpolish ./cmd/punctpolish
-```
-
-You can also place the binary somewhere stable, for example:
-
-```bash
-mkdir -p ./bin
-go build -o ./bin/punctpolish ./cmd/punctpolish
-```
-
-Or run directly with Go:
-
-```bash
-go run ./cmd/punctpolish --dir /path/to/docs
-```
-
-## Usage
-
-After building, start the watcher by passing the directory to watch:
-
-```bash
-./punctpolish --dir /path/to/docs
-```
-
-If you built into `./bin`, run:
-
-```bash
-./bin/punctpolish --dir /path/to/docs
-```
-
-Common options:
-
-```bash
-./punctpolish \
-  --dir /path/to/docs \
-  --foreground \
-  --debounce 300ms \
-  --log-level warn
-```
-
-### CLI flags
-
-- `--dir`: root directory to watch, required
-- `--config`: explicit config file path
-- `--scan-on-start`: process existing matching files before entering watch mode
-- `--dry-run`: log what would change without writing files
-- `--foreground`: also write runtime logs to the terminal
-- `--debounce`: override debounce duration, for example `300ms`
-- `--log-level`: `debug`, `info`, `warn`, or `error` (default: `warn`)
-
-## Logging
-
-By default, `punctpolish` writes logs to `punctpolish.log` in the current working directory.
-
-Example:
-
-- If you run `./punctpolish --dir /path/to/docs` from `/Users/yourname/tools`, the log file will be `/Users/yourname/tools/punctpolish.log`
-- If you run it from the watched directory itself, the log file will be created there
-
-Default logging behavior:
-
-- Startup and argument errors are shown directly in the terminal and also written to the log file
-- Normal runtime logs are not written to the terminal
-- Default log level is `warn`
-- In normal use, the log file mainly contains warnings and errors
-- If you need more detail during debugging, start with `--log-level debug`
-- In `debug` mode, extra debug details are written to `punctpolish.log`; they are still not streamed to the terminal during normal running
-- If you also pass `--foreground`, runtime logs are written to both `punctpolish.log` and the terminal
-
-Examples:
-
-```bash
-./punctpolish --dir /path/to/docs
-./punctpolish --dir /path/to/docs --log-level debug
-./punctpolish --dir /path/to/docs --foreground --log-level debug
-```
-
-## Configuration
-
-The config file name is `.punctpolish.yaml`.
-
-If `--config` is not provided, `punctpolish` looks for `.punctpolish.yaml` in this order and uses the first file it finds:
-
-1. Current working directory
-2. The watched directory passed to `--dir`
-3. `$HOME`
-
-If no config file is found, the program runs with built-in defaults.
-
-Example:
-
-```yaml
-ext:
-  - .md
-  - .txt
-
-ignore:
-  - .git
-  - node_modules
-  - .idea
-  - .vscode
-  - dist
-  - build
-
-debounce: 500ms
-max_file_size: 10485760
-```
-
-### Config fields
-
-- `ext`: file extensions to process
-- `ignore`: directory names to skip entirely
-- `debounce`: debounce delay before processing a changed file
-- `max_file_size`: maximum file size in bytes
-
-Default behavior:
-
-- `ext`: `[".md"]`
-- `ignore`: `[".git", "node_modules", ".idea", ".vscode", "dist", "build"]`
-- `debounce`: `500ms`
-- `max_file_size`: `10485760` bytes (10 MB)
-
-### Config vs CLI flags
-
-The effective runtime config is resolved in this order:
-
-1. Built-in defaults
-2. Values from `.punctpolish.yaml`
-3. CLI flags
-
-That means CLI flags have the highest priority.
-
-Examples:
-
-- `--debounce 300ms` overrides `debounce: 500ms` from the config file
-- `--config /path/to/custom.yaml` changes which config file is loaded
-
-Current support is split like this:
-
-- Config file only: `ext`, `ignore`, `max_file_size`
-- Config file or CLI: `debounce`
-- CLI only: `--dir`, `--config`, `--scan-on-start`, `--dry-run`, `--log-level`
-
-### Recommended setup
-
-For a typical docs directory, create a `.punctpolish.yaml` like this:
-
-```yaml
-ext:
-  - .md
-  - .txt
-
-ignore:
-  - .git
-  - node_modules
-  - .idea
-  - .vscode
-  - dist
-  - build
-
-debounce: 500ms
-max_file_size: 10485760
-```
-
-Then run:
-
-```bash
-./punctpolish --dir /path/to/docs
-```
-
-Or, if you want to preview changes without rewriting files:
-
-```bash
-./punctpolish --dir /path/to/docs --dry-run --scan-on-start
-```
-
-## Run As A Background Service
-
-On macOS, the usual way to keep `punctpolish` running is `launchd`.
-
-### 1. Build the binary to a fixed path
-
-Example:
-
-```bash
-mkdir -p "$HOME/.local/bin"
-go build -o "$HOME/.local/bin/punctpolish" ./cmd/punctpolish
-```
-
-### 2. Create a `launchd` plist
-
-Create `~/Library/LaunchAgents/com.example.punctpolish.plist`:
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>com.example.punctpolish</string>
-
-  <key>ProgramArguments</key>
-  <array>
-    <string>/Users/yourname/.local/bin/punctpolish</string>
-    <string>--dir</string>
-    <string>/Users/yourname/path/to/docs</string>
-    <string>--config</string>
-    <string>/Users/yourname/path/to/.punctpolish.yaml</string>
-    <string>--scan-on-start</string>
-  </array>
-
-  <key>RunAtLoad</key>
-  <true/>
-
-  <key>KeepAlive</key>
-  <true/>
-
-  <key>WorkingDirectory</key>
-  <string>/Users/yourname/path/to/docs</string>
-</dict>
-</plist>
-```
-
-Replace the sample paths with your real absolute paths.
-
-### 3. Load and manage the service
-
-Load it:
-
-```bash
-launchctl load ~/Library/LaunchAgents/com.example.punctpolish.plist
-```
-
-Start immediately:
-
-```bash
-launchctl start com.example.punctpolish
-```
-
-Stop it:
-
-```bash
-launchctl stop com.example.punctpolish
-```
-
-Unload it:
-
-```bash
-launchctl unload ~/Library/LaunchAgents/com.example.punctpolish.plist
-```
-
-### 4. Verify it is running
-
-```bash
-launchctl list | grep punctpolish
-```
-
-If startup fails, inspect:
-
-- `/Users/yourname/path/to/docs/punctpolish.log`
-
-### Notes for background use
-
-- Use absolute paths in the plist for the binary, watched directory, and config file.
-- Keep the binary in a stable location so future rebuilds do not break the service.
-- If you update the binary or plist, unload and load the agent again.
-- `WorkingDirectory` also decides where the default `punctpolish.log` file is created.
-- `WorkingDirectory` helps config auto-discovery, but using `--config` is the most explicit and reliable setup for a background service.
-
-## What Gets Normalized
-
-For supported text files, `punctpolish` currently applies these transformations outside fenced code blocks:
-
-- Chinese punctuation to ASCII equivalents, for example `，` to `, ` and `！` to `! `
-- Chinese brackets and quotes to ASCII forms
-- Spacing between CJK and Latin/digit boundaries
-- Comma spacing normalization
-- Repeated space collapsing inside a line
-- Trailing punctuation removal at paragraph endings and list items
-
-Example:
+示例：
 
 ```text
 ERP系统已经上线，运行稳定！
 这个Agent负责处理JSON数据。
 ```
 
-Becomes:
+处理后会变成：
 
 ```text
 ERP 系统已经上线, 运行稳定
 这个 Agent 负责处理 JSON 数据
 ```
 
-Fenced blocks such as triple-backtick code blocks are preserved as-is.
+## 运行要求
 
-## Testing
+- macOS
+- Go 1.23.12 或更高版本
 
-Run unit tests:
+## 构建
+
+```bash
+go build -o punctpolish ./cmd/punctpolish
+```
+
+也可以直接运行：
+
+```bash
+go run ./cmd/punctpolish --dir /path/to/docs
+```
+
+## 使用方式
+
+最基本的启动方式：
+
+```bash
+./punctpolish --dir /path/to/docs
+```
+
+常见用法：
+
+```bash
+./punctpolish \
+  --dir /path/to/docs \
+  --foreground \
+  --debounce 300ms \
+  --log-level debug
+```
+
+命令行参数：
+
+- `--dir`：要监听的根目录
+- `--config`：显式指定配置文件路径
+- `--scan-on-start`：启动时先处理一遍已有文件，再进入监听模式
+- `--dry-run`：只输出会发生的变化，不实际写回文件
+- `--foreground`：同时把运行日志输出到终端
+- `--debounce`：覆盖默认 debounce 时间
+- `--log-level`：`debug`、`info`、`warn`、`error`
+- `--log-file`：显式指定日志文件路径
+
+## 配置文件
+
+配置文件名为 `.punctpolish.yaml`
+
+程序会按下面顺序查找配置文件：
+
+1. `--config` 指定的路径
+2. 当前工作目录
+3. 被监听的目录
+4. `$HOME`
+
+如果都找不到，就使用内置默认配置。
+
+示例：
+
+```yaml
+ext:
+  - .md
+  - .txt
+
+ignore:
+  - .git
+  - node_modules
+  - .idea
+  - .vscode
+
+debounce: 500ms
+max_file_size: 10485760
+```
+
+字段说明：
+
+- `ext`：要处理的文件扩展名
+- `ignore`：要忽略的目录名
+- `debounce`：文件变化后等待多久再处理
+- `max_file_size`：允许处理的最大文件大小，单位为字节
+
+默认值：
+
+- `ext`：`.md`
+- `ignore`：`.git`、`node_modules`、`.idea`、`.vscode`、`dist`、`build`
+- `debounce`：`500ms`
+- `max_file_size`：`10485760`
+
+## 日志
+
+默认日志路径为：
+
+- `$XDG_STATE_HOME/punctpolish/punctpolish.log`
+- 如果没有设置 `XDG_STATE_HOME`，则为 `~/.local/state/punctpolish/punctpolish.log`
+
+如果希望同时在终端看到运行日志，可以加上 `--foreground`
+
+## 测试
+
+运行常规测试：
 
 ```bash
 go test ./...
 ```
 
-Run integration tests:
+运行 watcher 集成测试：
 
 ```bash
-go test -tags integration -v ./test/
+go test -tags integration -v ./test
 ```
 
-There is also a manual smoke test script:
+运行手工 smoke test：
 
 ```bash
-./test/run.sh
+bash test/run.sh
 ```
 
-## Project Structure
+## 说明
 
-- `cmd/punctpolish`: CLI entrypoint
-- `internal/app`: application wiring and lifecycle
-- `internal/config`: config loading and defaults
-- `internal/watcher`: recursive fsnotify watcher
-- `internal/processor`: text normalization pipeline
-- `internal/fileutil`: text detection and write-loop protection
-- `test`: integration tests and smoke test script
+- 默认情况下，程序启动时不会把已有文件全部重写
+- 如果你希望启动时先处理一遍已有文件，可以使用 `--scan-on-start`
+- 只有扩展名匹配配置的文件才会被处理
+- 启动后新创建的子目录也会自动加入监听范围
+- 文件里的所有内容都会参与检测和替换，包括 fenced code block 中的内容
 
-## Notes
-
-- The watcher only processes files whose extension matches the configured list.
-- New subdirectories created after startup are added to the watch set automatically.
-- Binary files are skipped even if their extension matches.

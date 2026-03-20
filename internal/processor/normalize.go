@@ -29,20 +29,10 @@ func NormalizeText(input string) string {
 }
 
 // linePass wraps a line-level function into a document-level stage.
-// It automatically skips lines inside fenced code blocks (``` or ~~~).
 func linePass(fn func(string) string) stage {
 	return func(input string) string {
 		lines := strings.Split(input, "\n")
-		inFence := false
 		for i, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-				inFence = !inFence
-				continue
-			}
-			if inFence {
-				continue
-			}
 			lines[i] = fn(line)
 		}
 		return strings.Join(lines, "\n")
@@ -51,19 +41,11 @@ func linePass(fn func(string) string) stage {
 
 // stripParaEndSeparators is a document-level stage that removes trailing
 // punctuation from lines that end a sentence: paragraph boundaries (followed
-// by a blank line or end of input) and list items. Fenced code blocks are skipped.
+// by a blank line or end of input) and list items.
 func stripParaEndSeparators(input string) string {
 	lines := strings.Split(input, "\n")
-	inFence := false
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
-			inFence = !inFence
-			continue
-		}
-		if inFence {
-			continue
-		}
 		isParaEnd := i == len(lines)-1 || strings.TrimSpace(lines[i+1]) == ""
 		if isParaEnd || isListItem(trimmed) {
 			lines[i] = reTrailingSep.ReplaceAllString(line, "")
