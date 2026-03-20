@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -12,17 +11,17 @@ import (
 	"punctpolish/internal/config"
 	"punctpolish/internal/fileutil"
 	"punctpolish/internal/processor"
+	"punctpolish/internal/scanner"
 )
 
 // Watcher wraps fsnotify and adds recursive watching, extension filtering,
 // debouncing, and self-write suppression.
 type Watcher struct {
-	cfg       config.Config
-	fw        *fsnotify.Watcher
-	proc      *processor.Processor
-	guard     *fileutil.WriteGuard
-	extSet    map[string]struct{}
-	ignoreSet map[string]struct{}
+	cfg    config.Config
+	fw     *fsnotify.Watcher
+	proc   *processor.Processor
+	guard  *fileutil.WriteGuard
+	filter *scanner.Filter
 
 	// debounce state: path → pending timer
 	dmu     sync.Mutex
@@ -36,24 +35,13 @@ func New(cfg config.Config, proc *processor.Processor, guard *fileutil.WriteGuar
 		return nil, err
 	}
 
-	extSet := make(map[string]struct{}, len(cfg.Extensions))
-	for _, e := range cfg.Extensions {
-		extSet[strings.ToLower(e)] = struct{}{}
-	}
-
-	ignoreSet := make(map[string]struct{}, len(cfg.IgnoreDirs))
-	for _, d := range cfg.IgnoreDirs {
-		ignoreSet[d] = struct{}{}
-	}
-
 	return &Watcher{
-		cfg:       cfg,
-		fw:        fw,
-		proc:      proc,
-		guard:     guard,
-		extSet:    extSet,
-		ignoreSet: ignoreSet,
-		pending:   make(map[string]*time.Timer),
+		cfg:     cfg,
+		fw:      fw,
+		proc:    proc,
+		guard:   guard,
+		filter:  scanner.NewFilter(cfg.Extensions, cfg.IgnoreDirs),
+		pending: make(map[string]*time.Timer),
 	}, nil
 }
 
@@ -67,7 +55,7 @@ func (w *Watcher) AddDir(dir string) error {
 		if !d.IsDir() {
 			return nil
 		}
-		if w.isIgnored(filepath.Base(path)) {
+		if w.filter.IgnoreDir(filepath.Base(path)) {
 			slog.Debug("ignoring directory", "path", path)
 			return filepath.SkipDir
 		}
@@ -83,22 +71,7 @@ func (w *Watcher) AddDir(dir string) error {
 // ScanAndProcess walks dir and immediately processes all matching files.
 // Used only when --scan-on-start is set.
 func (w *Watcher) ScanAndProcess(dir string) {
-	_ = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
-		if err != nil {
-			slog.Warn("scan: cannot access path", "path", path, "error", err)
-			return nil
-		}
-		if d.IsDir() {
-			if w.isIgnored(filepath.Base(path)) {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if w.isTargetFile(path) {
-			w.proc.Process(path) //nolint:errcheck // scan: errors already logged inside Process
-		}
-		return nil
-	})
+	scanner.Walk(dir, w.filter, w.proc)
 }
 
 // Run starts the event loop. It blocks until done is closed.
@@ -135,7 +108,7 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 	// A new directory was created; register it immediately.
 	if event.Has(fsnotify.Create) {
 		if info, err := os.Stat(path); err == nil && info.IsDir() {
-			if !w.isIgnored(filepath.Base(path)) {
+			if !w.filter.IgnoreDir(filepath.Base(path)) {
 				if err := w.AddDir(path); err != nil {
 					slog.Warn("cannot add new directory", "path", path, "error", err)
 				}
@@ -153,7 +126,7 @@ func (w *Watcher) handleEvent(event fsnotify.Event) {
 		return
 	}
 
-	if !w.isTargetFile(path) {
+	if !w.filter.MatchesExt(path) {
 		return
 	}
 
@@ -184,19 +157,7 @@ func (w *Watcher) scheduleProcess(path string) {
 		w.dmu.Unlock()
 
 		slog.Info("file changed", "path", path)
-		w.proc.Process(path) //nolint:errcheck // watch loop: errors already logged inside Process
+		w.proc.Process(path) //nolint:errcheck // watch loop: logged inside Process
 	})
 }
 
-// isTargetFile returns true when path has one of the configured extensions.
-func (w *Watcher) isTargetFile(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	_, ok := w.extSet[ext]
-	return ok
-}
-
-// isIgnored returns true when name matches one of the configured ignore dirs.
-func (w *Watcher) isIgnored(name string) bool {
-	_, ok := w.ignoreSet[name]
-	return ok
-}

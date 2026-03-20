@@ -15,6 +15,7 @@ import (
 	"punctpolish/internal/fileutil"
 	"punctpolish/internal/logging"
 	"punctpolish/internal/processor"
+	"punctpolish/internal/scanner"
 )
 
 func main() {
@@ -22,8 +23,10 @@ func main() {
 	fs.SetOutput(io.Discard)
 
 	var (
-		dir         = fs.String("dir", "", "root directory to watch (mutually exclusive with --file)")
-		file        = fs.String("file", "", "single file to process once and exit (mutually exclusive with --dir)")
+		dir         = fs.String("dir", "", "root directory to watch (mutually exclusive with --file/--scan)")
+		file        = fs.String("file", "", "single file to process once and exit (mutually exclusive with --dir/--scan)")
+		scan        = fs.String("scan", "", "recursively process all matching files in directory and exit (mutually exclusive with --dir/--file)")
+		ext         = fs.String("ext", "", "comma-separated extensions to process, e.g. .md,.txt (overrides config; applies to --file and --scan)")
 		cfgFile     = fs.String("config", "", "path to config file (default: auto-discover .punctpolish.yaml)")
 		scanOnStart = fs.Bool("scan-on-start", false, "process all matching files once before entering watch mode")
 		dryRun      = fs.Bool("dry-run", false, "print what would change without writing files")
@@ -54,11 +57,17 @@ func main() {
 		fatal(resolvedLog, "punctpolish only supports macOS")
 	}
 
-	if *dir != "" && *file != "" {
-		fatal(resolvedLog, "--dir and --file are mutually exclusive")
+	modeCount := 0
+	for _, v := range []string{*dir, *file, *scan} {
+		if v != "" {
+			modeCount++
+		}
 	}
-	if *dir == "" && *file == "" {
-		fatal(resolvedLog, "one of --dir or --file is required")
+	if modeCount > 1 {
+		fatal(resolvedLog, "--dir, --file, and --scan are mutually exclusive")
+	}
+	if modeCount == 0 {
+		fatal(resolvedLog, "one of --dir, --file, or --scan is required")
 	}
 
 	// --- single-file mode ---
@@ -79,6 +88,29 @@ func main() {
 		if _, err := proc.Process(absFile); err != nil {
 			fatal(resolvedLog, fmt.Sprintf("failed to process %q: %v", absFile, err))
 		}
+		return
+	}
+
+	// --- scan mode ---
+	if *scan != "" {
+		absDir, err := resolveDir(*scan)
+		if err != nil {
+			fatal(resolvedLog, fmt.Sprintf("cannot access --scan %q: %v", *scan, err))
+		}
+
+		cfg, err := config.Load(*cfgFile, absDir)
+		if err != nil {
+			fatal(resolvedLog, fmt.Sprintf("cannot load config: %v", err))
+		}
+		cfg.DryRun = *dryRun
+		if *ext != "" {
+			cfg.Extensions = splitExt(*ext)
+		}
+
+		guard := fileutil.NewWriteGuard(config.DefaultWriteGap)
+		proc := processor.New(guard, cfg.MaxFileSize, cfg.DryRun)
+		f := scanner.NewFilter(cfg.Extensions, cfg.IgnoreDirs)
+		scanner.Walk(absDir, f, proc)
 		return
 	}
 
@@ -106,6 +138,20 @@ func main() {
 	if err := app.New(cfg, absDir).Run(); err != nil {
 		fatal(resolvedLog, fmt.Sprintf("fatal error: %v", err))
 	}
+}
+
+// splitExt parses a comma-separated extension string like ".md,.txt" into a
+// slice. Each token is trimmed and lower-cased; empty tokens are skipped.
+func splitExt(s string) []string {
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // resolveFile validates that path exists and is a regular file, then returns
@@ -164,6 +210,7 @@ func printStartupError(message, logFile string) {
 	fmt.Fprintf(&b, "  %s --dir /path/to/docs\n", name)
 	fmt.Fprintf(&b, "  %s --dir /path/to/docs --scan-on-start\n", name)
 	fmt.Fprintf(&b, "  %s --file /path/to/note.md\n", name)
-	fmt.Fprintf(&b, "  %s --file /path/to/note.md --dry-run\n", name)
+	fmt.Fprintf(&b, "  %s --scan /path/to/docs\n", name)
+	fmt.Fprintf(&b, "  %s --scan /path/to/docs --ext .md,.txt --dry-run\n", name)
 	fmt.Fprint(os.Stderr, b.String())
 }

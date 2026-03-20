@@ -9,7 +9,7 @@
 - 将常见中文标点替换为 ASCII 标点
 - 自动处理中英文, 数字之间的空格, 例如 `ERP 系统`, `JSON 数据`
 - 跳过二进制文件, 并避免自己写回文件时触发死循环
-- 支持 `--dry-run`, `--scan-on-start` 和单文件一次性处理 (`--file`)
+- 支持 `--dry-run`, `--scan-on-start`, 单文件处理 (`--file`) 和目录批量处理 (`--scan`)
 
 示例
 
@@ -44,7 +44,7 @@ go run ./cmd/punctpolish --dir /path/to/docs
 
 ## 使用方式
 
-`--dir` 和 `--file` 二选一, 不能同时使用
+`--dir`, `--file`, `--scan` 三选一, 不能同时使用
 
 **监听目录 (持续运行)**
 
@@ -71,10 +71,26 @@ go run ./cmd/punctpolish --dir /path/to/docs
 ./punctpolish --file /path/to/note.md --dry-run
 ```
 
+**批量扫描目录 (处理完即退出)**
+
+```bash
+./punctpolish --scan /path/to/docs
+```
+
+```bash
+./punctpolish --scan /path/to/docs --ext .md,.txt
+```
+
+```bash
+./punctpolish --scan /path/to/docs --ext .md,.txt --dry-run
+```
+
 命令行参数
 
-- `--dir`: 要监听的根目录 (与 `--file` 互斥)
-- `--file`: 处理单个文件后退出 (与 `--dir` 互斥)
+- `--dir`: 要监听的根目录 (与 `--file`/`--scan` 互斥)
+- `--file`: 处理单个文件后退出 (与 `--dir`/`--scan` 互斥)
+- `--scan`: 递归扫描目录, 处理完即退出 (与 `--dir`/`--file` 互斥)
+- `--ext`: 逗号分隔的扩展名列表, 例如 `.md,.txt`, 覆盖配置文件中的 `ext` 字段 (仅 `--file` 和 `--scan` 模式有效)
 - `--config`: 显式指定配置文件路径
 - `--scan-on-start`: 启动时先处理一遍已有文件, 再进入监听模式 (仅 `--dir` 模式有效)
 - `--dry-run`: 只输出会发生的变化, 不实际写回文件
@@ -91,7 +107,7 @@ go run ./cmd/punctpolish --dir /path/to/docs
 
 1. `--config` 指定的路径
 2. 当前工作目录
-3. `--dir` 指定的目录, 或 `--file` 所在的目录
+3. `--dir`/`--scan` 指定的目录, 或 `--file` 所在的目录
 4. `$HOME`
 
 如果都找不到, 就使用内置默认配置
