@@ -72,3 +72,13 @@ func TestNormalizeText_DoesNotInsertSpacesInsideBareURL(t *testing.T) {
 		t.Fatalf("NormalizeText() should preserve bare URLs while still spacing surrounding text\ngot:  %q\nwant: %q", got, want)
 	}
 }
+
+func TestNormalizeText_PreservesWindowsCRLF(t *testing.T) {
+	input := "ERP系统和JSON数据：请联系admin@example.com！\r\n"
+
+	got := NormalizeText(input)
+	want := "ERP 系统和 JSON 数据: 请联系 admin@example.com! \r\n"
+	if got != want {
+		t.Fatalf("NormalizeText() with CRLF mismatch\ngot:  %q\nwant: %q", got, want)
+	}
+}

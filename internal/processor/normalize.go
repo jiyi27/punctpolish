@@ -19,7 +19,10 @@ var textLineTransforms = []lineTransform{
 // NormalizeText processes only normal Markdown text and leaves fenced code
 // blocks untouched.
 func NormalizeText(input string) string {
-	lines := strings.Split(input, "\n")
+	hasCRLF := strings.Contains(input, "\r\n")
+	cleanedInput := strings.ReplaceAll(input, "\r\n", "\n")
+
+	lines := strings.Split(cleanedInput, "\n")
 	normalized := make([]string, len(lines))
 
 	inFence := false
@@ -49,7 +52,11 @@ func NormalizeText(input string) string {
 		normalized[i] = normalizeTextLine(line)
 	}
 
-	return strings.Join(normalized, "\n")
+	output := strings.Join(normalized, "\n")
+	if hasCRLF {
+		output = strings.ReplaceAll(output, "\n", "\r\n")
+	}
+	return output
 }
 
 func normalizeTextLine(line string) string {
