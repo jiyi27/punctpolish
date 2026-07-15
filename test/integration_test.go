@@ -1,15 +1,3 @@
-//go:build integration
-
-// Package test contains end-to-end integration tests for punctpolish.
-//
-// These tests intentionally stay small and opinionated:
-//   - one test for the core watcher flow
-//   - one test to prove startup does not rewrite existing files
-//   - one test for --scan-on-start, because it changes that default behavior
-//
-// Run with:
-//
-//	go test -tags integration -v ./test/
 package test
 
 import (
@@ -17,53 +5,32 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"punctpolish/internal/processor"
 )
 
-const (
-	testDebounce = "200ms"
-	grace        = 700 * time.Millisecond
-	binaryName   = "/tmp/punctpolish-integration-test"
-)
-
-type fileSnapshot struct {
-	content string
-	modTime time.Time
-}
-
-// TestMain builds the binary once before running all integration tests.
-func TestMain(m *testing.M) {
-	cmd := exec.Command("go", "build", "-o", binaryName, "../cmd/punctpolish")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		panic("failed to build punctpolish: " + err.Error())
-	}
-	defer os.Remove(binaryName)
-
-	os.Exit(m.Run())
-}
-
-func startWatcher(t *testing.T, dir string, extraArgs ...string) func() {
+func buildBinary(t *testing.T) string {
 	t.Helper()
 
-	args := append([]string{"--dir", dir, "--debounce", testDebounce}, extraArgs...)
-	cmd := exec.Command(binaryName, args...)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Start(); err != nil {
-		t.Fatalf("cannot start watcher: %v", err)
+	binary := filepath.Join(t.TempDir(), "punctpolish")
+	cmd := exec.Command("go", "build", "-o", binary, "../cmd/punctpolish")
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("build punctpolish: %v\n%s", err, output)
 	}
+	return binary
+}
 
-	time.Sleep(300 * time.Millisecond)
-	return func() { _ = cmd.Process.Kill() }
+func run(t *testing.T, binary string, args ...string) {
+	t.Helper()
+
+	cmd := exec.Command(binary, args...)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run punctpolish: %v\n%s", err, output)
+	}
 }
 
 func writeFile(t *testing.T, path, content string) {
 	t.Helper()
-
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -74,116 +41,56 @@ func writeFile(t *testing.T, path, content string) {
 
 func readFile(t *testing.T, path string) string {
 	t.Helper()
-
 	b, err := os.ReadFile(path)
 	if err != nil {
-		t.Fatalf("cannot read %s: %v", path, err)
+		t.Fatal(err)
 	}
 	return string(b)
 }
 
-func snapshotFile(t *testing.T, path string) fileSnapshot {
-	t.Helper()
+func TestDirectoryProcessesOnlyMarkdownAndTextFiles(t *testing.T) {
+	root := t.TempDir()
+	markdown := filepath.Join(root, "nested", "note.MD")
+	text := filepath.Join(root, "plain.txt")
+	other := filepath.Join(root, "source.go")
+	markdownOriginal := "结果：成功！\n"
+	textOriginal := "ERP系统和JSON数据。\n"
+	otherOriginal := "结果：成功！\n"
+	writeFile(t, markdown, markdownOriginal)
+	writeFile(t, text, textOriginal)
+	writeFile(t, other, otherOriginal)
 
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatalf("cannot stat %s: %v", path, err)
+	run(t, buildBinary(t), root)
+
+	if got, want := readFile(t, markdown), processor.NormalizeText(markdownOriginal); got != want {
+		t.Errorf("markdown = %q, want %q", got, want)
 	}
-
-	return fileSnapshot{
-		content: readFile(t, path),
-		modTime: info.ModTime(),
+	if got, want := readFile(t, text), processor.NormalizeText(textOriginal); got != want {
+		t.Errorf("text = %q, want %q", got, want)
+	}
+	if got := readFile(t, other); got != otherOriginal {
+		t.Errorf("non-allowlisted file changed: %q", got)
 	}
 }
 
-func assertFileUnchanged(t *testing.T, path string, before fileSnapshot) {
-	t.Helper()
-
-	after := snapshotFile(t, path)
-	if after.content != before.content {
-		t.Fatalf("expected %s content to stay unchanged\ngot:  %q\nwant: %q", path, after.content, before.content)
-	}
-	if !after.modTime.Equal(before.modTime) {
-		t.Fatalf("expected %s mod time to stay unchanged\ngot:  %v\nwant: %v", path, after.modTime, before.modTime)
-	}
-}
-
-func waitForFileContent(t *testing.T, path string, want string) {
-	t.Helper()
-
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if got := readFile(t, path); got == want {
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
+func TestSingleFileAcceptsAnyTextExtensionAndSkipsBinaryContent(t *testing.T) {
+	root := t.TempDir()
+	logFile := filepath.Join(root, "note.log")
+	binaryFile := filepath.Join(root, "image.bin")
+	original := "结果：成功！\n"
+	writeFile(t, logFile, original)
+	if err := os.WriteFile(binaryFile, []byte{0, 1, 2, 3}, 0o644); err != nil {
+		t.Fatal(err)
 	}
 
-	got := readFile(t, path)
-	t.Fatalf("file did not reach expected content in time\ngot:  %q\nwant: %q", got, want)
-}
+	binary := buildBinary(t)
+	run(t, binary, logFile)
+	run(t, binary, binaryFile)
 
-func TestWatcher_ModifiesOnlyTheFileThatChanged(t *testing.T) {
-	dir := t.TempDir()
-
-	targetPath := filepath.Join(dir, "target.md")
-	targetOriginal := "# note\n\nAlready clean.\n"
-	writeFile(t, targetPath, targetOriginal)
-
-	untouchedPath := filepath.Join(dir, "untouched.md")
-	untouchedOriginal := "苹果、香蕉、橙子。\n"
-	writeFile(t, untouchedPath, untouchedOriginal)
-
-	untouchedBefore := snapshotFile(t, untouchedPath)
-
-	stop := startWatcher(t, dir)
-	defer stop()
-
-	targetUpdated := "# note\n\n结果：成功！请联系admin@example.com。\n新增ERP系统说明。\n"
-	writeFile(t, targetPath, targetUpdated)
-
-	want := processor.NormalizeText(targetUpdated)
-	waitForFileContent(t, targetPath, want)
-
-	assertFileUnchanged(t, untouchedPath, untouchedBefore)
-}
-
-func TestWatcher_DoesNotTouchExistingFilesOnStart(t *testing.T) {
-	dir := t.TempDir()
-
-	firstPath := filepath.Join(dir, "first.md")
-	secondPath := filepath.Join(dir, "second.md")
-
-	writeFile(t, firstPath, "苹果、香蕉、橙子。\n")
-	writeFile(t, secondPath, "ERP系统和JSON数据以及这个Agent。\n")
-
-	firstBefore := snapshotFile(t, firstPath)
-	secondBefore := snapshotFile(t, secondPath)
-
-	stop := startWatcher(t, dir)
-	defer stop()
-
-	time.Sleep(grace)
-
-	assertFileUnchanged(t, firstPath, firstBefore)
-	assertFileUnchanged(t, secondPath, secondBefore)
-}
-
-func TestWatcher_ScanOnStartProcessesExistingFiles(t *testing.T) {
-	dir := t.TempDir()
-
-	path := filepath.Join(dir, "pre.md")
-	original := "苹果、香蕉、橙子。\n"
-	writeFile(t, path, original)
-
-	stop := startWatcher(t, dir, "--scan-on-start")
-	defer stop()
-
-	time.Sleep(grace)
-
-	got := readFile(t, path)
-	want := processor.NormalizeText(original)
-	if got != want {
-		t.Fatalf("expected --scan-on-start to normalize existing file\ngot:  %q\nwant: %q", got, want)
+	if got, want := readFile(t, logFile), processor.NormalizeText(original); got != want {
+		t.Errorf("text file = %q, want %q", got, want)
+	}
+	if got, want := readFile(t, binaryFile), string([]byte{0, 1, 2, 3}); got != want {
+		t.Errorf("binary file changed: %q", got)
 	}
 }

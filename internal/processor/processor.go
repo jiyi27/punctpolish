@@ -3,30 +3,27 @@ package processor
 import (
 	"log/slog"
 	"os"
+
 	"punctpolish/internal/fileutil"
 )
 
+const DefaultMaxFileSize = 10 * 1024 * 1024 // 10 MB
+
 // Processor reads a file, normalizes its text content, and writes it back.
-// It relies on a WriteGuard to mark files it writes so the watcher can skip
-// the resulting self-triggered events.
 type Processor struct {
-	guard       *fileutil.WriteGuard
 	maxFileSize int64
-	dryRun      bool
 }
 
 // New creates a Processor.
-func New(guard *fileutil.WriteGuard, maxFileSize int64, dryRun bool) *Processor {
+func New(maxFileSize int64) *Processor {
 	return &Processor{
-		guard:       guard,
 		maxFileSize: maxFileSize,
-		dryRun:      dryRun,
 	}
 }
 
 // Process applies text normalization to the file at path.
 // It returns whether the file was changed and any error encountered.
-// The caller decides how to handle errors; the watch loop logs and ignores them.
+// The caller decides how to handle errors.
 func (p *Processor) Process(path string) (changed bool, err error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -66,14 +63,6 @@ func (p *Processor) Process(path string) (changed bool, err error) {
 		slog.Debug("file unchanged after normalization", "path", path)
 		return false, nil
 	}
-
-	if p.dryRun {
-		slog.Info("dry-run: file would be normalized", "path", path)
-		return true, nil
-	}
-
-	// Mark before writing so the resulting fsnotify event is suppressed.
-	p.guard.Mark(path)
 
 	if err := os.WriteFile(path, []byte(normalized), info.Mode()); err != nil {
 		slog.Error("cannot write file", "path", path, "error", err)

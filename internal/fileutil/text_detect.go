@@ -2,6 +2,7 @@ package fileutil
 
 import (
 	"bytes"
+	"io"
 	"os"
 )
 
@@ -27,7 +28,7 @@ func IsTextFile(path string) (bool, error) {
 
 	buf := make([]byte, sniffSize)
 	n, err := f.Read(buf)
-	if err != nil && n == 0 {
+	if err != nil && err != io.EOF {
 		return false, err
 	}
 	buf = buf[:n]

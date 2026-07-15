@@ -59,6 +59,11 @@ func TestIsTextFile_Binary(t *testing.T) {
 
 func TestIsTextFile_EmptyFile(t *testing.T) {
 	path := writeTempFile(t, []byte{})
-	// An empty file read returns 0 bytes and likely EOF; should not crash.
-	_, _ = IsTextFile(path)
+	ok, err := IsTextFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Error("expected empty file to be detected as text")
+	}
 }

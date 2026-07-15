@@ -1,216 +1,48 @@
 package main
 
 import (
-	"flag"
 	"fmt"
-	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
-	"runtime"
-	"strings"
 
-	"punctpolish/internal/app"
-	"punctpolish/internal/config"
-	"punctpolish/internal/fileutil"
-	"punctpolish/internal/logging"
 	"punctpolish/internal/processor"
 	"punctpolish/internal/scanner"
 )
 
 func main() {
-	fs := flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
-	fs.SetOutput(io.Discard)
-
-	var (
-		dir         = fs.String("dir", "", "root directory to watch (mutually exclusive with --file/--scan)")
-		file        = fs.String("file", "", "single file to process once and exit (mutually exclusive with --dir/--scan)")
-		scan        = fs.String("scan", "", "recursively process all matching files in directory and exit (mutually exclusive with --dir/--file)")
-		ext         = fs.String("ext", "", "comma-separated extensions to process, e.g. .md,.txt (overrides config; applies to --file and --scan)")
-		cfgFile     = fs.String("config", "", "path to config file (default: auto-discover .punctpolish.yaml)")
-		scanOnStart = fs.Bool("scan-on-start", false, "process all matching files once before entering watch mode")
-		dryRun      = fs.Bool("dry-run", false, "print what would change without writing files")
-		foreground  = fs.Bool("foreground", false, "also write runtime logs to stderr")
-		debounce    = fs.Duration("debounce", 0, "debounce duration (e.g. 300ms); overrides config file")
-		logLevel    = fs.String("log-level", "", "log verbosity: debug|info|warn|error (default: warn)")
-		logFile     = fs.String("log-file", "", "path to log file (default: $XDG_STATE_HOME/punctpolish/punctpolish.log)")
-	)
-
-	if err := fs.Parse(os.Args[1:]); err != nil {
-		resolvedLog, closeLog, logErr := logging.Setup("", "", false)
-		if logErr == nil {
-			defer closeLog()
-			slog.Error("invalid command line arguments", "error", err)
-		}
-		printStartupError(err.Error(), resolvedLog)
+	if len(os.Args) != 2 {
+		usage()
 		os.Exit(2)
 	}
 
-	resolvedLog, closeLog, err := logging.Setup(*logFile, *logLevel, *foreground)
+	target, err := filepath.Abs(os.Args[1])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "error: cannot initialize logger: %v\n", err)
-		os.Exit(1)
-	}
-	defer closeLog()
-
-	if runtime.GOOS != "darwin" {
-		fatal(resolvedLog, "punctpolish only supports macOS")
+		fatal(err)
 	}
 
-	modeCount := 0
-	for _, v := range []string{*dir, *file, *scan} {
-		if v != "" {
-			modeCount++
-		}
-	}
-	if modeCount > 1 {
-		fatal(resolvedLog, "--dir, --file, and --scan are mutually exclusive")
-	}
-	if modeCount == 0 {
-		fatal(resolvedLog, "one of --dir, --file, or --scan is required")
-	}
-
-	// --- single-file mode ---
-	if *file != "" {
-		absFile, err := resolveFile(*file)
-		if err != nil {
-			fatal(resolvedLog, fmt.Sprintf("cannot access --file %q: %v", *file, err))
-		}
-
-		cfg, err := config.Load(*cfgFile, filepath.Dir(absFile))
-		if err != nil {
-			fatal(resolvedLog, fmt.Sprintf("cannot load config: %v", err))
-		}
-		cfg.DryRun = *dryRun
-
-		guard := fileutil.NewWriteGuard(config.DefaultWriteGap)
-		proc := processor.New(guard, cfg.MaxFileSize, cfg.DryRun)
-		if _, err := proc.Process(absFile); err != nil {
-			fatal(resolvedLog, fmt.Sprintf("failed to process %q: %v", absFile, err))
-		}
-		return
-	}
-
-	// --- scan mode ---
-	if *scan != "" {
-		absDir, err := resolveDir(*scan)
-		if err != nil {
-			fatal(resolvedLog, fmt.Sprintf("cannot access --scan %q: %v", *scan, err))
-		}
-
-		cfg, err := config.Load(*cfgFile, absDir)
-		if err != nil {
-			fatal(resolvedLog, fmt.Sprintf("cannot load config: %v", err))
-		}
-		cfg.DryRun = *dryRun
-		if *ext != "" {
-			cfg.Extensions = splitExt(*ext)
-		}
-
-		guard := fileutil.NewWriteGuard(config.DefaultWriteGap)
-		proc := processor.New(guard, cfg.MaxFileSize, cfg.DryRun)
-		f := scanner.NewFilter(cfg.Extensions, cfg.IgnoreDirs)
-		scanner.Walk(absDir, f, proc)
-		return
-	}
-
-	// --- watch mode ---
-	absDir, err := resolveDir(*dir)
+	info, err := os.Stat(target)
 	if err != nil {
-		fatal(resolvedLog, fmt.Sprintf("cannot access --dir %q: %v", *dir, err))
+		fatal(err)
 	}
 
-	cfg, err := config.Load(*cfgFile, absDir)
-	if err != nil {
-		fatal(resolvedLog, fmt.Sprintf("cannot load config: %v", err))
-	}
-
-	cfg.ScanOnStart = *scanOnStart
-	cfg.DryRun = *dryRun
-
-	if *debounce > 0 {
-		cfg.Debounce = *debounce
-	}
-	if *logLevel != "" {
-		cfg.LogLevel = *logLevel
-	}
-
-	if err := app.New(cfg, absDir).Run(); err != nil {
-		fatal(resolvedLog, fmt.Sprintf("fatal error: %v", err))
-	}
-}
-
-// splitExt parses a comma-separated extension string like ".md,.txt" into a
-// slice. Each token is trimmed and lower-cased; empty tokens are skipped.
-func splitExt(s string) []string {
-	parts := strings.Split(s, ",")
-	out := make([]string, 0, len(parts))
-	for _, p := range parts {
-		p = strings.ToLower(strings.TrimSpace(p))
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-// resolveFile validates that path exists and is a regular file, then returns
-// its absolute path.
-func resolveFile(path string) (string, error) {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(abs)
-	if err != nil {
-		return "", err
-	}
+	proc := processor.New(processor.DefaultMaxFileSize)
 	if info.IsDir() {
-		return "", fmt.Errorf("%q is a directory, not a file", abs)
+		scanner.Walk(target, proc)
+		return
 	}
-	return abs, nil
+	if !info.Mode().IsRegular() {
+		fatal(fmt.Errorf("%q is not a regular file or directory", target))
+	}
+	if _, err := proc.Process(target); err != nil {
+		fatal(err)
+	}
 }
 
-// resolveDir validates that path exists and is a directory, then returns its
-// absolute path.
-func resolveDir(path string) (string, error) {
-	abs, err := filepath.Abs(path)
-	if err != nil {
-		return "", err
-	}
-	info, err := os.Stat(abs)
-	if err != nil {
-		return "", err
-	}
-	if !info.IsDir() {
-		return "", fmt.Errorf("%q is not a directory", abs)
-	}
-	return abs, nil
+func usage() {
+	fmt.Fprintf(os.Stderr, "usage: %s <file-or-directory>\n", filepath.Base(os.Args[0]))
 }
 
-// fatal logs msg at error level, prints a startup error to stderr, and exits.
-func fatal(logFile, msg string) {
-	slog.Error(msg, "log_file", logFile)
-	printStartupError(msg, logFile)
+func fatal(err error) {
+	fmt.Fprintf(os.Stderr, "error: %v\n", err)
 	os.Exit(1)
-}
-
-func printStartupError(message, logFile string) {
-	name := filepath.Base(os.Args[0])
-	var b strings.Builder
-	b.WriteString("error: ")
-	b.WriteString(message)
-	b.WriteString("\n")
-	if logFile != "" {
-		b.WriteString("log file: ")
-		b.WriteString(logFile)
-		b.WriteString("\n")
-	}
-	b.WriteString("examples:\n")
-	fmt.Fprintf(&b, "  %s --dir /path/to/docs\n", name)
-	fmt.Fprintf(&b, "  %s --dir /path/to/docs --scan-on-start\n", name)
-	fmt.Fprintf(&b, "  %s --file /path/to/note.md\n", name)
-	fmt.Fprintf(&b, "  %s --scan /path/to/docs\n", name)
-	fmt.Fprintf(&b, "  %s --scan /path/to/docs --ext .md,.txt --dry-run\n", name)
-	fmt.Fprint(os.Stderr, b.String())
 }
